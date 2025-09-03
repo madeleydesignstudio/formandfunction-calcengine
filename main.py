@@ -107,81 +107,17 @@ class BeamAnalysis:
             "S460": 460
         }
 
-    def get_embedded_beam_data(self) -> List[Dict[str, Any]]:
-        """Fallback beam data when API is unavailable"""
-        return [
-            {
-                "section_designation": "UB406x178x74",
-                "mass_per_metre": 74.6,
-                "depth_of_section": 412.8,
-                "width_of_section": 179.5,
-                "thickness_web": 9.3,
-                "thickness_flange": 16.0,
-                "root_radius": 10.2,
-                "depth_between_fillets": 360.8,
-                "ratios_for_local_buckling_web": 38.8,
-                "ratios_for_local_buckling_flange": 5.61,
-                "end_clearance": 369.0,
-                "notch": 360.8,
-                "dimensions_for_detailing_n": 45.0,
-                "surface_area_per_metre": 1.17,
-                "surface_area_per_tonne": 15.7,
-                "second_moment_of_area_axis_y": 27400,
-                "second_moment_of_area_axis_z": 1600,
-                "radius_of_gyration_axis_y": 17.1,
-                "radius_of_gyration_axis_z": 4.22,
-                "elastic_modulus_axis_y": 1330,
-                "elastic_modulus_axis_z": 178,
-                "plastic_modulus_axis_y": 1500,
-                "plastic_modulus_axis_z": 275,
-                "buckling_parameter": 0.338,
-                "torsional_index": 29.6,
-                "warping_constant": 0.581,
-                "torsional_constant": 53.8,
-                "area_of_section": 95.0
-            },
-            {
-                "section_designation": "UB406x178x67",
-                "mass_per_metre": 67.1,
-                "depth_of_section": 406.4,
-                "width_of_section": 177.9,
-                "thickness_web": 8.6,
-                "thickness_flange": 12.8,
-                "root_radius": 10.2,
-                "depth_between_fillets": 360.8,
-                "ratios_for_local_buckling_web": 42.0,
-                "ratios_for_local_buckling_flange": 6.95,
-                "end_clearance": 362.6,
-                "notch": 360.8,
-                "dimensions_for_detailing_n": 45.0,
-                "surface_area_per_metre": 1.15,
-                "surface_area_per_tonne": 17.1,
-                "second_moment_of_area_axis_y": 23500,
-                "second_moment_of_area_axis_z": 1350,
-                "radius_of_gyration_axis_y": 16.6,
-                "radius_of_gyration_axis_z": 4.09,
-                "elastic_modulus_axis_y": 1160,
-                "elastic_modulus_axis_z": 152,
-                "plastic_modulus_axis_y": 1300,
-                "plastic_modulus_axis_z": 234,
-                "buckling_parameter": 0.364,
-                "torsional_index": 25.4,
-                "warping_constant": 0.424,
-                "torsional_constant": 36.4,
-                "area_of_section": 85.5
-            }
-        ]
 
-    def fetch_beams_from_api(self) -> List[Dict[str, Any]]:
-        """Fetch beam data from the Go API with fallback to embedded data"""
-        try:
-            response = requests.get(f"{API_BASE_URL}/beams", timeout=10)
-            response.raise_for_status()
-            logger.info("Successfully fetched beam data from Go API")
-            return response.json()
-        except requests.RequestException as e:
-            logger.warning(f"Failed to fetch beams from API: {e}, using embedded data as fallback")
-            return self.get_embedded_beam_data()
+def fetch_beams_from_api(self) -> List[Dict[str, Any]]:
+    """Fetch beam data from the Go API"""
+    try:
+        response = requests.get(f"{API_BASE_URL}/beams", timeout=10)
+        response.raise_for_status()
+        logger.info("Successfully fetched beam data from Go API")
+        return response.json()
+    except requests.RequestException as e:
+        logger.error(f"Failed to fetch beams from API: {e}")
+        raise  # Re-raise the exception instead of falling back
 
     def find_beam(self, designation: str) -> Optional[Dict[str, Any]]:
         """Find a specific beam by designation"""

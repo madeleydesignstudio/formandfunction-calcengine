@@ -107,17 +107,100 @@ class BeamAnalysis:
             "S460": 460
         }
 
+    def get_embedded_beam_data(self) -> List[Dict[str, Any]]:
+        """Fallback beam data when API is unavailable"""
+        return [
+            {
+                "section_designation": "UB406x178x74",
+                "mass_per_metre": 74.6,
+                "depth_of_section": 412.8,
+                "width_of_section": 179.5,
+                "thickness_web": 9.3,
+                "thickness_flange": 16.0,
+                "root_radius": 10.2,
+                "depth_between_fillets": 360.8,
+                "ratios_for_local_buckling_web": 38.8,
+                "ratios_for_local_buckling_flange": 5.61,
+                "end_clearance": 369.0,
+                "notch": 360.8,
+                "dimensions_for_detailing_n": 45.0,
+                "surface_area_per_metre": 1.17,
+                "surface_area_per_tonne": 15.7,
+                "second_moment_of_area_axis_y": 27400,
+                "second_moment_of_area_axis_z": 1600,
+                "radius_of_gyration_axis_y": 17.1,
+                "radius_of_gyration_axis_z": 4.22,
+                "elastic_modulus_axis_y": 1330,
+                "elastic_modulus_axis_z": 178,
+                "plastic_modulus_axis_y": 1500,
+                "plastic_modulus_axis_z": 275,
+                "buckling_parameter": 0.338,
+                "torsional_index": 29.6,
+                "warping_constant": 0.581,
+                "torsional_constant": 53.8,
+                "area_of_section": 95.0
+            },
+            {
+                "section_designation": "UB406x178x67",
+                "mass_per_metre": 67.1,
+                "depth_of_section": 406.4,
+                "width_of_section": 177.9,
+                "thickness_web": 8.6,
+                "thickness_flange": 12.8,
+                "root_radius": 10.2,
+                "depth_between_fillets": 360.8,
+                "ratios_for_local_buckling_web": 42.0,
+                "ratios_for_local_buckling_flange": 6.95,
+                "end_clearance": 362.6,
+                "notch": 360.8,
+                "dimensions_for_detailing_n": 45.0,
+                "surface_area_per_metre": 1.15,
+                "surface_area_per_tonne": 17.1,
+                "second_moment_of_area_axis_y": 23500,
+                "second_moment_of_area_axis_z": 1350,
+                "radius_of_gyration_axis_y": 16.6,
+                "radius_of_gyration_axis_z": 4.09,
+                "elastic_modulus_axis_y": 1160,
+                "elastic_modulus_axis_z": 152,
+                "plastic_modulus_axis_y": 1300,
+                "plastic_modulus_axis_z": 234,
+                "buckling_parameter": 0.364,
+                "torsional_index": 25.4,
+                "warping_constant": 0.424,
+                "torsional_constant": 36.4,
+                "area_of_section": 85.5
+            }
+        ]
 
-def fetch_beams_from_api(self) -> List[Dict[str, Any]]:
-    """Fetch beam data from the Go API"""
-    try:
-        response = requests.get(f"{API_BASE_URL}/beams", timeout=10)
-        response.raise_for_status()
-        logger.info("Successfully fetched beam data from Go API")
-        return response.json()
-    except requests.RequestException as e:
-        logger.error(f"Failed to fetch beams from API: {e}")
-        raise  # Re-raise the exception instead of falling back
+    def fetch_beams_from_api(self) -> List[Dict[str, Any]]:
+        """Fetch beam data from the Go API with fallback to embedded data"""
+        try:
+            response = requests.get(f"{API_BASE_URL}/beams", timeout=10)
+            response.raise_for_status()
+
+            data = response.json()
+
+            # Validate the response structure
+            if not isinstance(data, list):
+                raise ValueError(f"Expected array, got {type(data)}")
+
+            # Validate each beam has required fields
+            for beam in data:
+                if not isinstance(beam, dict) or 'section_designation' not in beam:
+                    raise ValueError("Invalid beam data structure")
+
+            logger.info(f"Successfully fetched {len(data)} beams from Go API")
+            return data
+
+        except requests.RequestException as e:
+            logger.warning(f"Failed to fetch beams from API: {e}, using embedded data as fallback")
+            return self.get_embedded_beam_data()
+        except (ValueError, KeyError) as e:
+            logger.error(f"Invalid beam data format: {e}, using embedded data as fallback")
+            return self.get_embedded_beam_data()
+        except Exception as e:
+            logger.error(f"Unexpected error fetching beams: {e}, using embedded data as fallback")
+            return self.get_embedded_beam_data()
 
     def find_beam(self, designation: str) -> Optional[Dict[str, Any]]:
         """Find a specific beam by designation"""
@@ -128,51 +211,87 @@ def fetch_beams_from_api(self) -> List[Dict[str, Any]]:
         return None
 
     def calculate_moment(self, load: float, span: float, load_type: str = "uniform") -> float:
-        """Calculate maximum bending moment based on load type"""
-        if load_type == "uniform":
-            # Uniformly distributed load: M = wL²/8
-            return (load * span**2) / 8
-        elif load_type == "point":
-            # Point load at center: M = PL/4
-            return (load * span) / 4
-        else:
-            # Default to uniform
-            return (load * span**2) / 8
+        """Calculate maximum bending moment in kNm"""
+        try:
+            if load <= 0 or span <= 0:
+                raise ValueError("Load and span must be positive values")
+
+            if load_type == "uniform":
+                # Uniformly distributed load: M = wL²/8
+                moment = (load * span**2) / 8
+            elif load_type == "point":
+                # Point load at center: M = PL/4
+                moment = (load * span) / 4
+            else:
+                # Default to uniform
+                moment = (load * span**2) / 8
+
+            if moment <= 0 or np.isnan(moment) or np.isinf(moment):
+                raise ValueError("Invalid moment calculation result")
+
+            return moment
+        except Exception as e:
+            logger.error(f"Error calculating moment: {str(e)}")
+            raise
 
     def calculate_shear(self, load: float, load_type: str = "uniform") -> float:
         """Calculate maximum shear force"""
-        if load_type == "uniform":
-            # Uniformly distributed load: V = wL/2
-            return load / 2
-        elif load_type == "point":
-            # Point load: V = P/2
-            return load / 2
-        else:
-            return load / 2
+        try:
+            if load <= 0:
+                raise ValueError("Load must be a positive value")
+
+            if load_type == "uniform":
+                # Uniformly distributed load: V = wL/2
+                shear = load / 2
+            elif load_type == "point":
+                # Point load: V = P/2
+                shear = load / 2
+            else:
+                shear = load / 2
+
+            if shear <= 0 or np.isnan(shear) or np.isinf(shear):
+                raise ValueError("Invalid shear calculation result")
+
+            return shear
+        except Exception as e:
+            logger.error(f"Error calculating shear: {str(e)}")
+            raise
 
     def calculate_deflection(self, load: float, span: float, I: float, load_type: str = "uniform") -> float:
         """Calculate maximum deflection in mm"""
-        # Convert I from cm⁴ to mm⁴
-        I_mm4 = I * 10000
+        try:
+            if load <= 0 or span <= 0 or I <= 0:
+                raise ValueError("Load, span, and moment of inertia must be positive values")
 
-        if load_type == "uniform":
-            # Uniformly distributed load: δ = 5wL⁴/(384EI)
-            # Convert load from kN/m to N/mm
-            w = load * 1000 / (span * 1000)  # N/mm
-            L = span * 1000  # mm
-            deflection = (5 * w * L**4) / (384 * self.E * I_mm4)
-        elif load_type == "point":
-            # Point load at center: δ = PL³/(48EI)
-            P = load * 1000  # N
-            L = span * 1000  # mm
-            deflection = (P * L**3) / (48 * self.E * I_mm4)
-        else:
-            # Default to uniform
-            w = load * 1000 / (span * 1000)
-            L = span * 1000
-            deflection = (5 * w * L**4) / (384 * self.E * I_mm4)
+            # Convert I from cm⁴ to mm⁴
+            I_mm4 = I * 10000
 
-        return abs(deflection)
+            if load_type == "uniform":
+                # Uniformly distributed load: δ = 5wL⁴/(384EI)
+                # Convert load from kN/m to N/mm
+                w = load * 1000 / (span * 1000)  # N/mm
+                L = span * 1000  # mm
+                deflection = (5 * w * L**4) / (384 * self.E * I_mm4)
+            elif load_type == "point":
+                # Point load at center: δ = PL³/(48EI)
+                P = load * 1000  # N
+                L = span * 1000  # mm
+                deflection = (P * L**3) / (48 * self.E * I_mm4)
+            else:
+                # Default to uniform
+                w = load * 1000 / (span * 1000)
+                L = span * 1000
+                deflection = (5 * w * L**4) / (384 * self.E * I_mm4)
+
+            deflection = abs(deflection)
+
+            if np.isnan(deflection) or np.isinf(deflection):
+                raise ValueError("Invalid deflection calculation result")
+
+            return deflection
+        except Exception as e:
+            logger.error(f"Error calculating deflection: {str(e)}")
+            raise
 
     def calculate_stress_utilization(self, moment: float, elastic_modulus: float,
                                    material_grade: str, safety_factor: float = 1.6) -> float:
@@ -196,62 +315,104 @@ def fetch_beams_from_api(self) -> List[Dict[str, Any]]:
 
     def perform_analysis(self, request: CalculationRequest) -> CalculationResult:
         """Perform comprehensive beam analysis"""
+        try:
+            logger.info(f"Starting beam analysis for: {request.beam_designation or 'optimal beam selection'}")
 
-        # Find the beam if designation is provided, otherwise find optimal beam
-        if request.beam_designation:
-            beam_data = self.find_beam(request.beam_designation)
-            if not beam_data:
-                raise HTTPException(status_code=404, detail=f"Beam {request.beam_designation} not found")
-        else:
-            # Find optimal beam based on loading
-            beam_data = self.find_optimal_beam(request)
+            # Validate input parameters
+            if request.applied_load <= 0:
+                raise ValueError("Applied load must be greater than 0")
+            if request.span_length <= 0:
+                raise ValueError("Span length must be greater than 0")
+            if request.safety_factor <= 0:
+                raise ValueError("Safety factor must be greater than 0")
 
-        # Calculate structural responses
-        max_moment = self.calculate_moment(request.applied_load, request.span_length, request.load_type)
-        max_shear = self.calculate_shear(request.applied_load, request.load_type)
-        max_deflection = self.calculate_deflection(
-            request.applied_load,
-            request.span_length,
-            beam_data["second_moment_of_area_axis_y"],
-            request.load_type
-        )
+            # Find the beam if designation is provided, otherwise find optimal beam
+            if request.beam_designation:
+                beam_data = self.find_beam(request.beam_designation)
+                if not beam_data:
+                    raise HTTPException(status_code=404, detail=f"Beam {request.beam_designation} not found")
+                logger.info(f"Using specified beam: {request.beam_designation}")
+            else:
+                # Find optimal beam based on loading
+                beam_data = self.find_optimal_beam(request)
+                logger.info(f"Selected optimal beam: {beam_data.get('section_designation', 'Unknown')}")
 
-        # Calculate stress utilization
-        stress_utilization = self.calculate_stress_utilization(
-            max_moment,
-            beam_data["elastic_modulus_axis_y"],
-            request.material_grade,
-            request.safety_factor
-        )
+            # Validate beam data has required properties
+            required_properties = [
+                "second_moment_of_area_axis_y",
+                "elastic_modulus_axis_y",
+                "section_designation"
+            ]
+            for prop in required_properties:
+                if prop not in beam_data or beam_data[prop] is None:
+                    raise ValueError(f"Beam data missing required property: {prop}")
 
-        # Check deflection limits (L/250 for general construction)
-        deflection_limit = (request.span_length * 1000) / 250  # mm
-        deflection_ok = max_deflection <= deflection_limit
+            # Calculate structural responses
+            max_moment = self.calculate_moment(request.applied_load, request.span_length, request.load_type)
+            max_shear = self.calculate_shear(request.applied_load, request.load_type)
+            max_deflection = self.calculate_deflection(
+                request.applied_load,
+                request.span_length,
+                beam_data["second_moment_of_area_axis_y"],
+                request.load_type
+            )
 
-        # Overall adequacy check
-        is_adequate = stress_utilization <= 1.0 and deflection_ok
+            # Calculate stress utilization
+            stress_utilization = self.calculate_stress_utilization(
+                max_moment,
+                beam_data["elastic_modulus_axis_y"],
+                request.material_grade,
+                request.safety_factor
+            )
 
-        # Calculate safety margin
-        safety_margin = (1.0 - stress_utilization) * 100 if stress_utilization < 1.0 else 0
+            # Validate calculations
+            if not all(isinstance(val, (int, float)) and not np.isnan(val) and not np.isinf(val)
+                      for val in [max_moment, max_shear, max_deflection, stress_utilization]):
+                raise ValueError("Invalid calculation results - NaN or Inf values detected")
 
-        # Generate recommendations
-        recommendations = self.generate_recommendations(
-            stress_utilization, deflection_ok, max_deflection, deflection_limit
-        )
+            # Check deflection limits (L/250 for general construction)
+            deflection_limit = (request.span_length * 1000) / 250  # mm
+            deflection_ok = max_deflection <= deflection_limit
 
-        return CalculationResult(
-            beam=beam_data,
-            applied_load=request.applied_load,
-            span_length=request.span_length,
-            max_moment=round(max_moment, 2),
-            max_shear=round(max_shear, 2),
-            max_deflection=round(max_deflection, 2),
-            stress_utilization=round(stress_utilization, 3),
-            deflection_limit_check=deflection_ok,
-            is_adequate=is_adequate,
-            safety_margin=round(safety_margin, 1),
-            recommendations=recommendations
-        )
+            # Overall adequacy check
+            is_adequate = stress_utilization <= 1.0 and deflection_ok
+
+            # Calculate safety margin
+            safety_margin = (1.0 - stress_utilization) * 100 if stress_utilization < 1.0 else 0
+
+            # Generate recommendations
+            recommendations = self.generate_recommendations(
+                stress_utilization, deflection_ok, max_deflection, deflection_limit
+            )
+
+            logger.info(f"Analysis completed successfully for beam: {beam_data['section_designation']}")
+
+            return CalculationResult(
+                beam=beam_data,
+                applied_load=request.applied_load,
+                span_length=request.span_length,
+                max_moment=round(max_moment, 2),
+                max_shear=round(max_shear, 2),
+                max_deflection=round(max_deflection, 2),
+                stress_utilization=round(stress_utilization, 3),
+                deflection_limit_check=deflection_ok,
+                is_adequate=is_adequate,
+                safety_margin=round(safety_margin, 1),
+                recommendations=recommendations
+            )
+
+        except HTTPException:
+            # Re-raise HTTP exceptions
+            raise
+        except ValueError as e:
+            logger.error(f"Validation error in beam analysis: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Invalid input: {str(e)}")
+        except KeyError as e:
+            logger.error(f"Missing data in beam analysis: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Missing beam property: {str(e)}")
+        except Exception as e:
+            logger.error(f"Unexpected error in beam analysis: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Analysis calculation failed: {str(e)}")
 
     def find_optimal_beam(self, request: CalculationRequest) -> Dict[str, Any]:
         """Find the most economical adequate beam"""
@@ -355,22 +516,40 @@ async def health_check():
 @app.get("/beams")
 async def get_beams():
     """Get all available beams from the API or embedded data"""
-    beams = analyzer.fetch_beams_from_api()
-    return {
-        "beams": beams,
-        "count": len(beams)
-    }
+    try:
+        beams = analyzer.fetch_beams_from_api()
+        return {
+            "beams": beams,
+            "count": len(beams),
+            "status": "success"
+        }
+    except Exception as e:
+        logger.error(f"Error in get_beams endpoint: {str(e)}")
+        # Fallback to embedded data
+        try:
+            embedded_beams = analyzer.get_embedded_beam_data()
+            return {
+                "beams": embedded_beams,
+                "count": len(embedded_beams),
+                "status": "fallback",
+                "error": str(e)
+            }
+        except Exception as fallback_error:
+            logger.error(f"Failed to get embedded beams: {str(fallback_error)}")
+            raise HTTPException(status_code=500, detail=f"Failed to fetch beams: {str(e)}")
 
 @app.post("/analyze", response_model=CalculationResult)
 async def analyze_beam(request: CalculationRequest):
     """Perform beam analysis calculations"""
     try:
+        logger.info(f"Starting analysis for request: {request}")
         result = analyzer.perform_analysis(request)
+        logger.info("Analysis completed successfully")
         return result
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Analysis error: {str(e)}")
+        logger.error(f"Analysis error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 @app.get("/beams/{designation}")

@@ -1,6 +1,6 @@
 # Form & Function Calc Engine
 
-A Python-based structural calculation engine for steel beam analysis using NumPy, Pandas, and SciPy. This independent service integrates with the Form & Function API to provide comprehensive structural engineering calculations, deployed on Railway.
+A Python-based structural calculation engine for steel beam analysis using NumPy, Pandas, and SciPy. This service communicates with the Form & Function Go API exclusively via gRPC for optimal performance and type safety.
 
 ## Features
 
@@ -20,32 +20,51 @@ A Python-based structural calculation engine for steel beam analysis using NumPy
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│   React Web     │───▶│   Go API        │───▶│  Steel Beam     │
-│   Frontend      │    │   (Railway)     │    │  Database       │
-│   (Vercel)      │    └─────────────────┘    └─────────────────┘
-└─────────────────┘             │
-         │                      │
+│   React Web     │───▶│   Go gRPC       │───▶│  Steel Beam     │
+│   Frontend      │    │   Server        │    │  Data           │
+│   (Vercel)      │    │   (Port 9090)   │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+         │                      ▲
+         │                      │ gRPC
          │              ┌─────────────────┐
          └─────────────▶│  Python Calc    │
                         │  Engine         │
-                        │ (Local: 8081)   │
-                        │ (Prod: Railway) │
+                        │  (Port 8081)    │
+                        │  gRPC Client    │
                         └─────────────────┘
 ```
 
 ## Prerequisites
 
 - Python 3.8 or higher
-- Go API accessible (steel beam data source)
+- Go gRPC server running (port 9090)
 - Virtual environment support
 - [Docker](https://docker.com) (for containerization)
-- [Railway CLI](https://docs.railway.app/develop/cli) (for deployment)
+- gRPC dependencies (protobuf, grpcio)
 
 ## Quick Start
 
 ### Local Development
 
-1. **Start the calc engine:**
+#### Option 1: Docker Compose (Recommended)
+
+```bash
+# From itsformandfunction directory
+docker-compose up --build
+```
+
+This starts both the Go gRPC server (port 9090) and Python calc engine (port 8081).
+
+#### Option 2: Manual Setup
+
+1. **Start the Go gRPC server first:**
+   ```bash
+   cd ../formandfunction-api
+   export GRPC_PORT=9090
+   go run .
+   ```
+
+2. **Start the calc engine:**
    ```bash
    ./start.sh
    ```
@@ -259,14 +278,17 @@ The `railway.json` and `Dockerfile` configure containerized deployment:
 
 **Local Testing:**
 ```bash
-# Run all tests
+# Run all tests (includes gRPC tests)
 python test_calc.py
 
-# Test specific functionality
+# Test gRPC-only setup
+python ../test_grpc_only.py
+
+# Test specific functionality  
 python -c "from main import BeamAnalysis; analyzer = BeamAnalysis(); print(analyzer.fetch_beams_from_api())"
 
-# Test local health
-npm run calc:health
+# Test health check
+curl http://localhost:8081/health
 ```
 
 **Production Testing:**

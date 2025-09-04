@@ -1,0 +1,98 @@
+syntax = "proto3";
+
+package steelbeam;
+
+option go_package = "formandfunction-api/proto/steelbeam";
+
+// SteelBeam message representing a steel beam with all its properties
+message SteelBeam {
+    string section_designation = 1;
+    double mass_per_metre = 2;
+    double depth_of_section = 3;
+    double width_of_section = 4;
+    double thickness_web = 5;
+    double thickness_flange = 6;
+    double root_radius = 7;
+    double depth_between_fillets = 8;
+    double ratios_for_local_buckling_web = 9;
+    double ratios_for_local_buckling_flange = 10;
+    double end_clearance = 11;
+    double notch = 12;
+    double dimensions_for_detailing_n = 13;
+    double surface_area_per_metre = 14;
+    double surface_area_per_tonne = 15;
+    double second_moment_of_area_axis_y = 16;
+    double second_moment_of_area_axis_z = 17;
+    double radius_of_gyration_axis_y = 18;
+    double radius_of_gyration_axis_z = 19;
+    double elastic_modulus_axis_y = 20;
+    double elastic_modulus_axis_z = 21;
+    double plastic_modulus_axis_y = 22;
+    double plastic_modulus_axis_z = 23;
+    double buckling_parameter = 24;
+    double torsional_index = 25;
+    double warping_constant = 26;
+    double torsional_constant = 27;
+    double area_of_section = 28;
+}
+
+// Request message to get all beams
+message GetBeamsRequest {}
+
+// Response message containing list of beams
+message GetBeamsResponse {
+    repeated SteelBeam beams = 1;
+}
+
+// Request message to get a specific beam by section designation
+message GetBeamRequest {
+    string section_designation = 1;
+}
+
+// Response message containing a single beam
+message GetBeamResponse {
+    SteelBeam beam = 1;
+    bool found = 2;
+}
+
+// Request message to create a new beam
+message CreateBeamRequest {
+    SteelBeam beam = 1;
+}
+
+// Response message for beam creation
+message CreateBeamResponse {
+    SteelBeam beam = 1;
+    bool success = 2;
+    string message = 3;
+}
+
+// Request message for stock status
+message GetStockStatusRequest {
+    string product_id = 1;
+    string postcode = 2;
+}
+
+// Response message for stock status
+message GetStockStatusResponse {
+    string product_id = 1;
+    string postcode = 2;
+    string status = 3;
+    bool success = 4;
+    string message = 5;
+}
+
+// SteelBeam service definition
+service SteelBeamService {
+    // Get all steel beams
+    rpc GetBeams(GetBeamsRequest) returns (GetBeamsResponse);
+
+    // Get a specific steel beam by section designation
+    rpc GetBeam(GetBeamRequest) returns (GetBeamResponse);
+
+    // Create a new steel beam
+    rpc CreateBeam(CreateBeamRequest) returns (CreateBeamResponse);
+
+    // Get stock status for a product
+    rpc GetStockStatus(GetStockStatusRequest) returns (GetStockStatusResponse);
+}

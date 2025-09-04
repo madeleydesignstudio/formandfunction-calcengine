@@ -3,8 +3,13 @@ numpy>=1.24.0
 pandas>=2.0.0
 scipy>=1.10.0
 
-# HTTP client for API requests
+# HTTP client (used for internal calc engine testing only)
 requests>=2.31.0
+
+# gRPC dependencies
+grpcio>=1.60.0
+grpcio-tools>=1.60.0
+protobuf>=4.25.0
 
 # Web framework for API endpoints
 fastapi>=0.104.0

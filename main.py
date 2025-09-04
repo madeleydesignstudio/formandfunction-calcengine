@@ -6,23 +6,24 @@ A Python-based calculation engine for structural steel beam analysis.
 
 import os
 import logging
+import json
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request as FastAPIRequest
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import requests
+from pydantic import BaseModel, ValidationError
 import numpy as np
 import pandas as pd
 from scipy import optimize
 import uvicorn
+from grpc_client import SteelBeamGRPCClient, get_beams_grpc
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuration
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8080")
+GRPC_SERVER_ADDRESS = os.getenv("GRPC_SERVER_ADDRESS", "localhost:9090")
 CALC_ENGINE_PORT = int(os.getenv("PORT", os.getenv("CALC_ENGINE_PORT", "8081")))
 
 app = FastAPI(
@@ -173,12 +174,10 @@ class BeamAnalysis:
         ]
 
     def fetch_beams_from_api(self) -> List[Dict[str, Any]]:
-        """Fetch beam data from the Go API with fallback to embedded data"""
+        """Fetch beam data from the Go API via gRPC with fallback to embedded data"""
         try:
-            response = requests.get(f"{API_BASE_URL}/beams", timeout=10)
-            response.raise_for_status()
-
-            data = response.json()
+            # Use gRPC to fetch beams
+            data = get_beams_grpc(GRPC_SERVER_ADDRESS)
 
             # Validate the response structure
             if not isinstance(data, list):
@@ -189,17 +188,12 @@ class BeamAnalysis:
                 if not isinstance(beam, dict) or 'section_designation' not in beam:
                     raise ValueError("Invalid beam data structure")
 
-            logger.info(f"Successfully fetched {len(data)} beams from Go API")
+            logger.info(f"Successfully fetched {len(data)} beams from Go API via gRPC")
             return data
 
-        except requests.RequestException as e:
-            logger.warning(f"Failed to fetch beams from API: {e}, using embedded data as fallback")
-            return self.get_embedded_beam_data()
-        except (ValueError, KeyError) as e:
-            logger.error(f"Invalid beam data format: {e}, using embedded data as fallback")
-            return self.get_embedded_beam_data()
         except Exception as e:
-            logger.error(f"Unexpected error fetching beams: {e}, using embedded data as fallback")
+            logger.error(f"Failed to fetch beams from gRPC API: {e}")
+            logger.info("Using embedded data as fallback")
             return self.get_embedded_beam_data()
 
     def find_beam(self, designation: str) -> Optional[Dict[str, Any]]:
@@ -490,14 +484,13 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Detailed health check"""
+    """Health check endpoint that tests connectivity to the Go API via gRPC"""
     try:
-        # Test API connectivity
-        response = requests.get(f"{API_BASE_URL}/beams", timeout=5)
-        response.raise_for_status()
+        # Test gRPC API connectivity
+        beams = get_beams_grpc(GRPC_SERVER_ADDRESS)
         api_status = "connected"
-        beam_count = len(response.json())
-        data_source = "go_api"
+        beam_count = len(beams)
+        data_source = "go_api_grpc"
     except Exception as e:
         # Fallback to embedded data
         embedded_beams = analyzer.get_embedded_beam_data()
@@ -510,7 +503,7 @@ async def health_check():
         "api_connection": api_status,
         "available_beams": beam_count,
         "data_source": data_source,
-        "calc_engine_port": CALC_ENGINE_PORT
+        "grpc_address": GRPC_SERVER_ADDRESS
     }
 
 @app.get("/beams")
@@ -538,10 +531,48 @@ async def get_beams():
             logger.error(f"Failed to get embedded beams: {str(fallback_error)}")
             raise HTTPException(status_code=500, detail=f"Failed to fetch beams: {str(e)}")
 
+
 @app.post("/analyze", response_model=CalculationResult)
-async def analyze_beam(request: CalculationRequest):
+async def analyze_beam(raw_request: FastAPIRequest):
     """Perform beam analysis calculations"""
     try:
+        # Log raw request for debugging
+        body = await raw_request.body()
+        logger.info(f"Raw request body: {body.decode()}")
+        logger.info(f"Content-Type: {raw_request.headers.get('content-type')}")
+
+        # Parse JSON manually for better error handling
+        try:
+            json_data = json.loads(body.decode())
+            logger.info(f"Parsed JSON: {json_data}")
+            logger.info(f"JSON type: {type(json_data)}")
+        except json.JSONDecodeError as json_e:
+            logger.error(f"JSON parsing error: {json_e}")
+            raise HTTPException(status_code=400, detail=f"Invalid JSON: {str(json_e)}")
+
+        # Show what we expect vs what we got
+        logger.info(f"Expected CalculationRequest fields: {list(CalculationRequest.__fields__.keys())}")
+        logger.info(f"Received JSON keys: {list(json_data.keys()) if isinstance(json_data, dict) else 'Not a dict'}")
+
+        # Validate against Pydantic model
+        try:
+            request = CalculationRequest(**json_data)
+            logger.info(f"Successfully created CalculationRequest: {request}")
+        except ValidationError as model_e:
+            logger.error(f"Pydantic validation error: {model_e}")
+            error_details = []
+            for error in model_e.errors():
+                error_details.append({
+                    "field": error.get("loc", []),
+                    "message": error.get("msg", ""),
+                    "type": error.get("type", ""),
+                    "input": error.get("input", "")
+                })
+            raise HTTPException(status_code=400, detail=error_details)
+        except Exception as model_e:
+            logger.error(f"General model validation error: {model_e}")
+            raise HTTPException(status_code=400, detail=f"Validation error: {str(model_e)}")
+
         logger.info(f"Starting analysis for request: {request}")
         result = analyzer.perform_analysis(request)
         logger.info("Analysis completed successfully")
@@ -551,6 +582,36 @@ async def analyze_beam(request: CalculationRequest):
     except Exception as e:
         logger.error(f"Analysis error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+
+@app.get("/analyze/test-format")
+async def get_analyze_format():
+    """Get the expected format for the analyze endpoint"""
+    return {
+        "endpoint": "POST /analyze",
+        "expected_format": {
+            "beam_designation": "UB406x178x74 (optional - if not provided, will find optimal beam)",
+            "applied_load": 15.0,
+            "span_length": 8.0,
+            "load_type": "uniform",
+            "safety_factor": 1.6,
+            "material_grade": "S355"
+        },
+        "example_request": {
+            "applied_load": 12.5,
+            "span_length": 6.0,
+            "load_type": "uniform",
+            "safety_factor": 1.6,
+            "material_grade": "S355"
+        },
+        "notes": {
+            "applied_load": "Applied load in kN",
+            "span_length": "Span length in meters",
+            "load_type": "Either 'uniform', 'point', or 'distributed'",
+            "safety_factor": "Safety factor (default 1.6)",
+            "material_grade": "Steel grade (S235, S275, S355, S460)",
+            "beam_designation": "Optional - leave empty for optimal beam selection"
+        }
+    }
 
 @app.get("/beams/{designation}")
 async def get_beam_info(designation: str):
